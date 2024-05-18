@@ -92,9 +92,9 @@ using Keys = std::set<Key>;
 // ----------------------------------------------------------
 std::unique_ptr<Xapp> xfw;
 std::unique_ptr<rc::MsgComm::Stub> rc_stub;
-
-int downlink_threshold = 0;  // A1 policy type 20008 (in percentage)
-
+void send_prediction_request(int ues_to_predict);
+//int downlink_threshold = 0;  // A1 policy type 20008 (in percentage)
+int downlink_threshold;
 // scoped enum to identify which API is used to send control messages
 enum class TsControlApi { REST, gRPC };
 TsControlApi ts_control_api;  // api to send control messages
@@ -148,16 +148,20 @@ struct PolicyHandler : public BaseReaderHandler<UTF8<>, PolicyHandler> {
   bool ue_id_found = false;
   string curr_key = "";
   string curr_value = "";
-  int policy_type_id;
-  int policy_instance_id;
-  int threshold;
+  //int policy_type_id;
+  //int policy_instance_id;
+  std::string threshold;
+  int UEID;
   std::string operation;
-  bool found_threshold = false;
-
+  std::string payload;
+  std::string policy_instance_id;
+  std::string policy_type_id;
+  bool found_threshold = false; 
+  int threshold1;
   bool Null() { return true; }
   bool Bool(bool b) { return true; }
   bool Int(int i) {
-
+    std::cout << "Integer value: " << i << std::endl;
     if (curr_key.compare("policy_type_id") == 0) {
       policy_type_id = i;
     } else if (curr_key.compare("policy_instance_id") == 0) {
@@ -186,11 +190,37 @@ struct PolicyHandler : public BaseReaderHandler<UTF8<>, PolicyHandler> {
   bool Uint64(uint64_t u) {  return true; }
   bool Double(double d) {  return true; }
   bool String(const char* str, SizeType length, bool copy) {
-
-    if (curr_key.compare("operation") != 0) {
+    if (curr_key.compare("operation") == 0) {
       operation = str;
+      std::cout << "operation=: " << str << std::endl;
+    }
+    else if (curr_key.compare("payload") == 0) {
+      found_threshold = true;
+      threshold = str;
+      cout << "now is payload" << endl;
+      std::cout << "curr_value (String): " << str << std::endl;
+      std::cout << "found_threshold: " << found_threshold << std::endl;
+      Document payloadDoc;
+      payloadDoc.Parse(str);
+      if (payloadDoc.HasMember("threshold") && payloadDoc["threshold"].IsInt()) {
+        threshold1 = payloadDoc["threshold"].GetInt();
+        cout << "[INFO] Setting Threshold for A1-P value: " << threshold1 << "\n";
+
+      } 
+
+    }
+    else if (curr_key.compare("policy_instance_id") == 0) {
+      policy_instance_id = str;
+      cout << "now is policy_instance_id" << endl;
+      std::cout << "curr_value (String): " << str << std::endl;
+    }
+    else if (curr_key.compare("policy_type_id") == 0) {
+      policy_type_id = str;
+      cout << "now is policy_type_id" << endl;
+      std::cout << "curr_value (String): " << str << std::endl;
     }
 
+    
     return true;
   }
   bool StartObject() {
@@ -200,7 +230,8 @@ struct PolicyHandler : public BaseReaderHandler<UTF8<>, PolicyHandler> {
   bool Key(const char* str, SizeType length, bool copy) {
 
     curr_key = str;
-
+    curr_key = std::string(str, length);
+    std::cout << "curr_key: " << curr_key << std::endl;
     return true;
   }
   bool EndObject(SizeType memberCount) {  return true; }
@@ -378,133 +409,6 @@ struct NodebHandler : public BaseReaderHandler<UTF8<>, NodebHandler> {
 
 };
 
-/* struct UEDataHandler : public BaseReaderHandler<UTF8<>, UEDataHandler> {
-  unordered_map<string, string> cell_pred;
-  std::string serving_cell_id;
-  int serving_cell_rsrp;
-  int serving_cell_rsrq;
-  int serving_cell_sinr;
-  bool in_serving_array = false;
-  int rf_meas_index = 0;
-
-  bool in_serving_report_object = false;
-
-  string curr_key = "";
-  string curr_value = "";
-  bool Null() { return true; }
-  bool Bool(bool b) { return true; }
-  bool Int(int i) {
-
-    return true;
-  }
-
-  bool Uint(unsigned i) {
-
-    if (in_serving_report_object) {
-      if (curr_key.compare("rsrp") == 0) {
-	serving_cell_rsrp = i;
-      } else if (curr_key.compare("rsrq") == 0) {
-	serving_cell_rsrq = i;
-      } else if (curr_key.compare("rssinr") == 0) {
-	serving_cell_sinr = i;
-      }
-    }
-
-    return true; }
-  bool Int64(int64_t i) {
-
-    return true; }
-  bool Uint64(uint64_t i) {
-
-    return true; }
-  bool Double(double d) { return true; }
-  bool String(const char* str, SizeType length, bool copy) {
-
-    if (curr_key.compare("ServingCellID") == 0) {
-      serving_cell_id = str;
-    }
-
-    return true;
-  }
-  bool StartObject() {
-    if (curr_key.compare("ServingCellRF") == 0) {
-      in_serving_report_object = true;
-    }
-
-    return true; }
-  bool Key(const char* str, SizeType length, bool copy) {
-
-    curr_key = str;
-    return true;
-  }
-  bool EndObject(SizeType memberCount) {
-    if (curr_key.compare("ServingCellRF") == 0) {
-      in_serving_report_object = false;
-    }
-    return true; }
-  bool StartArray() {
-
-    if (curr_key.compare("ServingCellRF") == 0) {
-      in_serving_array = true;
-    }
-
-    return true;
-  }
-  bool EndArray(SizeType elementCount) {
-
-    if (curr_key.compare("servingCellRF") == 0) {
-      in_serving_array = false;
-      rf_meas_index = 0;
-    }
-
-    return true; }
-}; */
-
-
-/* unordered_map<string, UEData> get_sdl_ue_data() {
-
-  fprintf(stderr, "In get_sdl_ue_data()\n");
-
-  unordered_map<string, string> ue_data;
-
-  unordered_map<string, UEData> return_ue_data_map;
-
-  std::string prefix3="";
-  Keys K2 = sdl->findKeys(nsu, prefix3);
-  DataMap Dk2 = sdl->get(nsu, K2);
-
-  string ue_json;
-  string ue_id;
-
-  for(auto si=K2.begin();si!=K2.end();++si){
-    std::vector<uint8_t> val_v = Dk2[(*si)]; // 4 lines to unpack a string
-    char val[val_v.size()+1];                               // from Data
-    int i;
-
-    for(i=0;i<val_v.size();++i) val[i] = (char)(val_v[i]);
-    val[i]='\0';
-      ue_id.assign((std::string)*si);
-
-      ue_json.assign(val);
-      ue_data[ue_id] =  ue_json;
-  }
-
-  for (auto map_iter = ue_data.begin(); map_iter != ue_data.end(); map_iter++) {
-    UEDataHandler handler;
-    Reader reader;
-    StringStream ss(map_iter->second.c_str());
-    reader.Parse(ss,handler);
-
-    string ueID = map_iter->first;
-    string serving_cell_id = handler.serving_cell_id;
-    int serv_rsrp = handler.serving_cell_rsrp;
-
-    return_ue_data_map[ueID] = {serving_cell_id, serv_rsrp};
-
-  }
-
-  return return_ue_data_map;
-} */
 
 void policy_callback( Message& mbuf, int mtype, int subid, int len, Msg_component payload,  void* data ) {
   string arg ((const char*)payload.get(), len); // RMR payload might not have a nil terminanted char
@@ -515,13 +419,17 @@ void policy_callback( Message& mbuf, int mtype, int subid, int len, Msg_componen
   PolicyHandler handler;
   Reader reader;
   StringStream ss(arg.c_str());
+  
   reader.Parse(ss,handler);
-
+  cout << "handler.found_threshold " << handler.found_threshold << endl;
   //Set the threshold value
-  if (handler.found_threshold) {
-    cout << "[INFO] Setting Threshold for A1-P value: " << handler.threshold << "%\n";
-    downlink_threshold = handler.threshold;
+
+  if (handler.found_threshold == true) {
+    cout << "[INFO] Setting Threshold for A1-P value: " << handler.threshold1 << "\n";
+    cout << "handler.found_thresholdtrue " << handler.found_threshold << endl;
+    downlink_threshold = handler.threshold1;
   }
+  send_prediction_request(downlink_threshold);
 
 }
 
@@ -642,14 +550,14 @@ void send_grpc_control_request( string ue_id, string target_cell_id ) {
     request->set_plmnid( data->second->global_nb_id.plmn_id );
     request->set_ranname( data->second->ran_name );
     gumi->set_plmnidentity(data->second->global_nb_id.plmn_id);
-  } else {
+  } /*else {
     cout << "[INFO] Cannot find RAN name corresponding to cell id = "<<target_cell_id<<endl;
     return;
     request->set_e2nodeid( "unknown_e2nodeid" );
     request->set_plmnid( "unknown_plmnid" );
     request->set_ranname( "unknown_ranname" );
     gumi->set_plmnidentity("unknown_plmnid");
-  }
+  }*/
   request->set_riccontrolackreqval( rc::RICControlAckEnum::RIC_CONTROL_ACK_UNKWON );
   //request->set_riccontrolackreqval( api::RIC_CONTROL_ACK_UNKWON);  // not yet used in api.proto
  cout<<"\nin ts xapp grpc message content \n"<< request->DebugString()<<"\n"; 
@@ -716,9 +624,6 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
   }
 
   float thresh = 0;
-  if( downlink_threshold > 0 ) {  // we also take into account the threshold in A1 policy type 20008
-    thresh = serving_cell_throughput * (downlink_threshold / 100.0);
-  }
 
   if ( highest_throughput > ( serving_cell_throughput + thresh ) ) {
 
@@ -726,7 +631,16 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
     if ( ts_control_api == TsControlApi::REST ) {
       send_rest_control_request( handler.ue_id, handler.serving_cell_id, highest_throughput_cell_id );
     } else {
-      send_grpc_control_request( handler.ue_id, highest_throughput_cell_id );
+      long int shift = 0x123456000; 
+      cout << "shift value =" << std::hex << shift << "  ,Origal cellid =" << highest_throughput_cell_id << endl;
+      long int shift_highest_throughput_cell_id = (std::stoi(highest_throughput_cell_id) + shift)*16;
+      cout << "shift cell id =" << shift_highest_throughput_cell_id << endl;
+      
+      stringstream tmp;
+      tmp << std::hex << std::uppercase << shift_highest_throughput_cell_id;
+      string str = tmp.str();
+
+      send_grpc_control_request( "3", "10" );
     }
 
   } else {
@@ -735,69 +649,42 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
 
 }
 
-void send_prediction_request( vector<string> ues_to_predict ) {
-  std::unique_ptr<Message> msg;
-  Msg_component payload;           // special type of unique pointer to the payload
 
-  int sz;
-  int i;
-  size_t plen;
-  Msg_component send_payload;
 
-  msg = xfw->Alloc_msg( 2048 );
+void send_prediction_request(int ues_to_predict) {
+    std::unique_ptr<Message> msg;
+    Msg_component payload;
 
-  sz = msg->Get_available_size();  // we'll reuse a message if we received one back; ensure it's big enough
-  if( sz < 2048 ) {
-    fprintf( stderr, "[ERROR] message returned did not have enough size: %d [%d]\n", sz, i );
-    exit( 1 );
-  }
+    int sz;
+    size_t plen;
+    Msg_component send_payload;
 
-  string ues_list = "[";
+    msg = xfw->Alloc_msg(2048);
 
-  for (int i = 0; i < ues_to_predict.size(); i++) {
-    if (i == ues_to_predict.size() - 1) {
-      ues_list = ues_list + "\"" + ues_to_predict.at(i) + "\"]";
-    } else {
-      ues_list = ues_list + "\"" + ues_to_predict.at(i) + "\"" + ",";
+    sz = msg->Get_available_size();  // 检查消息大小是否足够
+    if (sz < 2048) {
+        fprintf(stderr, "[ERROR] message returned did not have enough size: %d\n", sz);
+        exit(1);
     }
-  }
 
-  string message_body = "{\"UEPredictionSet\": " + ues_list + "}";
+    // 构建消息体
 
-  send_payload = msg->Get_payload(); // direct access to payload
-  snprintf( (char *) send_payload.get(), 2048, "%s", message_body.c_str() );
+    string message_body = "{\"UEPredictionSet\": " + std::to_string(ues_to_predict) + "}";
 
-  plen = strlen( (char *)send_payload.get() );
+    // 将消息体写入有效负载
+    send_payload = msg->Get_payload();
+    snprintf((char *)send_payload.get(), 2048, "%s", message_body.c_str());
+    plen = strlen((char *)send_payload.get());
 
-  cout << "[INFO] Prediction Request length=" << plen << ", payload=" << send_payload.get() << endl;
+    cout << "[INFO] Prediction Request length=" << plen << ", payload=" << send_payload.get() << endl;
 
-  // payload updated in place, nothing to copy from, so payload parm is nil
-  if ( ! msg->Send_msg( TS_UE_LIST, Message::NO_SUBID, plen, NULL )) { // msg type 30000
-    fprintf( stderr, "[ERROR] send failed: %d\n", msg->Get_state() );
-  }
-
+    // 发送消息
+    if (!msg->Send_msg(TS_UE_LIST, Message::NO_SUBID, plen, NULL)) {
+        fprintf(stderr, "[ERROR] send failed: %d\n", msg->Get_state());
+    }
 }
 
-/* This function works with Anomaly Detection(AD) xApp. It is invoked when anomalous UEs are send by AD xApp.
- * It parses the payload received from AD xApp, sends an ACK with same UEID as payload to AD xApp, and
- * sends a prediction request to the QP Driver xApp.
- */
-void ad_callback( Message& mbuf, int mtype, int subid, int len, Msg_component payload, void* data ) {
-  string json ((char *)payload.get(), len); // RMR payload might not have a nil terminanted char
 
-  cout << "[INFO] AD Callback got a message, type=" << mtype << ", length=" << len << "\n";
-  cout << "[INFO] Payload is " << json << "\n";
-
-  AnomalyHandler handler;
-  Reader reader;
-  StringStream ss(json.c_str());
-  reader.Parse(ss,handler);
-
-  // just sending ACK to the AD xApp
-  mbuf.Send_response( TS_ANOMALY_ACK, Message::NO_SUBID, len, nullptr );  // msg type 30004
-
-  send_prediction_request(handler.prediction_ues);
-}
 
 vector<string> get_nodeb_list( restclient::RestClient& client ) {
 
@@ -856,6 +743,11 @@ bool build_cell_mapping() {
         Reader reader;
         StringStream ss( response.body.c_str() );
         reader.Parse( ss, handler );
+
+	for ( int i = 0 ; i < 28 ; i++ ){
+		cout << "cells[" << i << "] = " << handler.cells[i] << ",   ";
+		cout << "cell_map[" << i << "] = " << cell_map[handler.cells[i]] << endl ;
+	}
       } catch (...) {
         cout << "[ERROR] Got an exception on parsing nodeb (stringstream read parse)\n";
         return false;
@@ -899,9 +791,9 @@ extern int main( int argc, char** argv ) {
   xfw = std::unique_ptr<Xapp>( new Xapp( port, true ) );
 
   xfw->Add_msg_cb( A1_POLICY_REQ, policy_callback, NULL );          // msg type 20010
-  xfw->Add_msg_cb( TS_QOE_PREDICTION, prediction_callback, NULL );  // msg type 30002
+  /*xfw->Add_msg_cb( TS_QOE_PREDICTION, prediction_callback, NULL );  // msg type 30002
   xfw->Add_msg_cb( TS_ANOMALY_UPDATE, ad_callback, NULL ); /*Register a callback function for msg type 30003*/
-
+  //send_grpc_control_request( "3", "10" );
   xfw->Run( nthreads );
 
 }
