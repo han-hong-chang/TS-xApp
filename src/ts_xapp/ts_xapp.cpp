@@ -244,6 +244,8 @@ struct PredictionHandler : public BaseReaderHandler<UTF8<>, PredictionHandler> {
   unordered_map<string, int> cell_pred_down;
   unordered_map<string, int> cell_pred_up;
   std::string ue_id;
+  std::string ueid;
+  std::string nbid;
   bool ue_id_found = false;
   string curr_key = "";
   string curr_value = "";
@@ -273,18 +275,23 @@ struct PredictionHandler : public BaseReaderHandler<UTF8<>, PredictionHandler> {
   bool Uint64(uint64_t u) {  return true; }
   bool Double(double d) {  return true; }
   bool String(const char* str, SizeType length, bool copy) {
+    if (curr_key.compare("ueid") == 0) {
+      ueid = str;
+      std::cout << "ueid=: " << str << std::endl;
+    }
+    else if (curr_key.compare("nbid") == 0) {
+      nbid = str;
+      std::cout << "nbid=: " << str << std::endl;
+    }
 
     return true;
   }
   bool StartObject() {  return true; }
   bool Key(const char* str, SizeType length, bool copy) {
-    if (!ue_id_found) {
-
-      ue_id = str;
-      ue_id_found = true;
-    } else {
-      curr_key = str;
-    }
+    curr_key = str;
+    curr_key = std::string(str, length);
+    std::cout << "curr_key: " << curr_key << std::endl;
+    return true;
     return true;
   }
   bool EndObject(SizeType memberCount) {  return true; }
@@ -592,9 +599,10 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
   } catch (...) {
     cout << "[ERROR] Got an exception on stringstream read parse\n";
   }
-
+  cout << "[INFO] ueid " << handler.ueid<< endl;
+  cout << "[INFO] target cell id" << handler.nbid << endl;
   // We are only considering download throughput
-  unordered_map<string, int> throughput_map = handler.cell_pred_down;
+  //unordered_map<string, int> throughput_map = handler.cell_pred_down;
 
   // Decision about CONTROL message
   // (1) Identify UE Id in Prediction message
@@ -602,50 +610,33 @@ void prediction_callback( Message& mbuf, int mtype, int subid, int len, Msg_comp
   //     If one of the cells has a higher throughput prediction than serving cell, send a CONTROL request
   //     We assume the first cell in the prediction message is the serving cell
 
-  int serving_cell_throughput = 0;
-  int highest_throughput = 0;
-  string highest_throughput_cell_id;
 
-  // Getting the current serving cell throughput prediction
-  auto cell = throughput_map.find( handler.serving_cell_id );
-  serving_cell_throughput = cell->second;
-
-   // Iterating to identify the highest throughput prediction
-  for (auto map_iter = throughput_map.begin(); map_iter != throughput_map.end(); map_iter++) {
-
-    string curr_cellid = map_iter->first;
-    int curr_throughput = map_iter->second;
-
-    if ( highest_throughput < curr_throughput ) {
-      highest_throughput = curr_throughput;
-      highest_throughput_cell_id = curr_cellid;
-    }
-
-  }
 
   float thresh = 0;
 
-  if ( highest_throughput > ( serving_cell_throughput + thresh ) ) {
 
     // sending a control request message
-    if ( ts_control_api == TsControlApi::REST ) {
-      send_rest_control_request( handler.ue_id, handler.serving_cell_id, highest_throughput_cell_id );
-    } else {
-      long int shift = 0x123456000; 
-      cout << "shift value =" << std::hex << shift << "  ,Origal cellid =" << highest_throughput_cell_id << endl;
-      long int shift_highest_throughput_cell_id = (std::stoi(highest_throughput_cell_id) + shift)*16;
-      cout << "shift cell id =" << shift_highest_throughput_cell_id << endl;
-      
-      stringstream tmp;
-      tmp << std::hex << std::uppercase << shift_highest_throughput_cell_id;
-      string str = tmp.str();
-
-      send_grpc_control_request( "3", "10" );
-    }
+  if ( ts_control_api == TsControlApi::REST ) {
+    cout << "[INFO] ueid " << handler.ueid<< endl;
 
   } else {
-    cout << "[INFO] The current serving cell \"" << handler.serving_cell_id << "\" is the best one" << endl;
-  }
+ 
+    long int shift = 0x123456000; 
+    cout << "shift value =" << std::hex << shift << "  ,Origal cellid =" << handler.nbid << endl;
+    long int shift_handler_nbid = (std::stoi(handler.nbid) + shift)*16;
+    cout << "shift cell id =" << shift_handler_nbid << endl;
+      
+    stringstream tmp;
+    tmp << std::hex << std::uppercase << shift_handler_nbid;
+    string str = tmp.str();
+    cout << "[INFO] type of str: " << typeid(str).name() << endl;
+    cout << "[INFO] type of handler.ueid: " << typeid(handler.ueid).name() << endl;
+    cout << "[INFO] str " << str << endl;
+    //send_grpc_control_request( handler.ueid, str);
+    send_grpc_control_request( handler.ueid, str);
+    }
+
+
 
 }
 
@@ -661,17 +652,18 @@ void send_prediction_request(int ues_to_predict) {
 
     msg = xfw->Alloc_msg(2048);
 
-    sz = msg->Get_available_size();  // 检查消息大小是否足够
+    sz = msg->Get_available_size();  // u检查消息大小是否足够  
+    cout << "szszszsz " << sz<< endl;
+         
     if (sz < 2048) {
         fprintf(stderr, "[ERROR] message returned did not have enough size: %d\n", sz);
         exit(1);
     }
 
-    // 构建消息体
+    
 
     string message_body = "{\"UEPredictionSet\": " + std::to_string(ues_to_predict) + "}";
 
-    // 将消息体写入有效负载
     send_payload = msg->Get_payload();
     snprintf((char *)send_payload.get(), 2048, "%s", message_body.c_str());
     plen = strlen((char *)send_payload.get());
@@ -762,6 +754,7 @@ bool build_cell_mapping() {
   return true;
 }
 
+
 extern int main( int argc, char** argv ) {
   int nthreads = 1;
   char*	port = (char *) "4560";
@@ -791,8 +784,8 @@ extern int main( int argc, char** argv ) {
   xfw = std::unique_ptr<Xapp>( new Xapp( port, true ) );
 
   xfw->Add_msg_cb( A1_POLICY_REQ, policy_callback, NULL );          // msg type 20010
-  /*xfw->Add_msg_cb( TS_QOE_PREDICTION, prediction_callback, NULL );  // msg type 30002
-  xfw->Add_msg_cb( TS_ANOMALY_UPDATE, ad_callback, NULL ); /*Register a callback function for msg type 30003*/
+  xfw->Add_msg_cb( TS_QOE_PREDICTION, prediction_callback, NULL );  // msg type 30002
+  //xfw->Add_msg_cb( TS_ANOMALY_UPDATE, ad_callback, NULL ); /*Register a callback function for msg type 30003*/ 
   //send_grpc_control_request( "3", "10" );
   xfw->Run( nthreads );
 
